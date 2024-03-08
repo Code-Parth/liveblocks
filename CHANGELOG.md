@@ -1,3 +1,17 @@
+# v1.10.3 (Unpublished)
+
+### `@liveblocks/react-comments`
+
+- Fix bug where the `showRoomName` prop on `InboxNotification.Thread` wasn’t
+  applied to notifications about mentions.
+
+# v1.10.2
+
+### `@liveblocks/client`
+
+- Fix bug where calling `.clone()` immediately after creating a new `LiveObject`
+  could throw an error
+
 # v1.10.1
 
 ### `@liveblocks/client`
