@@ -17,7 +17,7 @@ import {
   INBOX_NOTIFICATIONS_QUERY,
   POLLING_INTERVAL,
 } from "../liveblocks";
-import { dummyInboxNoficationData, dummyThreadData } from "./_dummies";
+import { dummyThreadData, dummyThreadInboxNotificationData } from "./_dummies";
 import MockWebSocket from "./_MockWebSocket";
 import { mockGetInboxNotifications } from "./_restMocks";
 import { generateFakeJwt } from "./_utils";
@@ -56,7 +56,7 @@ function createLiveblocksContextForTest() {
 describe("useInboxNotifications", () => {
   test("should fetch inbox notifications", async () => {
     const threads = [dummyThreadData()];
-    const inboxNotification = dummyInboxNoficationData();
+    const inboxNotification = dummyThreadInboxNotificationData();
     inboxNotification.threadId = threads[0].id;
     const inboxNotifications = [inboxNotification];
 
@@ -102,7 +102,7 @@ describe("useInboxNotifications", () => {
 
   test("should be referentially stable after rerendering", async () => {
     const threads = [dummyThreadData()];
-    const inboxNotification = dummyInboxNoficationData();
+    const inboxNotification = dummyThreadInboxNotificationData();
     inboxNotification.threadId = threads[0].id;
     const inboxNotifications = [inboxNotification];
 
@@ -153,7 +153,7 @@ describe("useInboxNotifications", () => {
 
   test("multiple instances of useInboxNotifications should dedupe requests", async () => {
     const threads = [dummyThreadData()];
-    const inboxNotification = dummyInboxNoficationData();
+    const inboxNotification = dummyThreadInboxNotificationData();
     inboxNotification.threadId = threads[0].id;
     const inboxNotifications = [inboxNotification];
 
@@ -250,12 +250,12 @@ describe("useInboxNotifications", () => {
 
   test("sort inbox notifications by notified at date before returning", async () => {
     const thread1 = dummyThreadData();
-    const oldInboxNotification = dummyInboxNoficationData();
+    const oldInboxNotification = dummyThreadInboxNotificationData();
     oldInboxNotification.threadId = thread1.id;
     oldInboxNotification.notifiedAt = new Date("2021-01-01");
 
     const thread2 = dummyThreadData();
-    const newInboxNotification = dummyInboxNoficationData();
+    const newInboxNotification = dummyThreadInboxNotificationData();
     newInboxNotification.threadId = thread2.id;
     newInboxNotification.notifiedAt = new Date("2021-01-02");
 
@@ -496,7 +496,7 @@ describe("useInboxNotifications: error", () => {
 describe("useInboxNotifications - Suspense", () => {
   test("should be referentially stable after rerendering", async () => {
     const threads = [dummyThreadData()];
-    const inboxNotification = dummyInboxNoficationData();
+    const inboxNotification = dummyThreadInboxNotificationData();
     inboxNotification.threadId = threads[0].id;
     const inboxNotifications = [inboxNotification];
 
@@ -564,7 +564,7 @@ describe("useInboxNotifications: polling", () => {
     let getInboxNotificationsReqCount = 0;
 
     const threads = [dummyThreadData()];
-    const inboxNotification = dummyInboxNoficationData();
+    const inboxNotification = dummyThreadInboxNotificationData();
     inboxNotification.threadId = threads[0].id;
     const inboxNotifications = [inboxNotification];
 
@@ -666,7 +666,7 @@ describe("useThreadsSuspense: error", () => {
     expect(result.current).toEqual(null);
 
     await waitFor(() =>
-      // Check if the error boundary's fallback UI is displayed
+      // Check if the error boundary's fallback is displayed
       expect(
         screen.getByText(
           "There was an error while getting inbox notifications."
@@ -679,7 +679,7 @@ describe("useThreadsSuspense: error", () => {
 
   test("should retry with exponential backoff on error and clear error boundary", async () => {
     const threads = [dummyThreadData()];
-    const inboxNotification = dummyInboxNoficationData();
+    const inboxNotification = dummyThreadInboxNotificationData();
     inboxNotification.threadId = threads[0].id;
     const inboxNotifications = [inboxNotification];
 
@@ -737,7 +737,7 @@ describe("useThreadsSuspense: error", () => {
 
     // A new fetch request for the threads should have been made after the initial render
     await waitFor(() => expect(getInboxNotificationsReqCount).toBe(1));
-    // Check if the error boundary's fallback UI is displayed
+    // Check if the error boundary's fallback is displayed
     expect(
       screen.getByText("There was an error while getting inbox notifications.")
     ).toBeInTheDocument();
@@ -750,7 +750,7 @@ describe("useThreadsSuspense: error", () => {
     // Simulate clicking the retry button
     fireEvent.click(screen.getByText("Retry"));
 
-    // The error boundary's fallback UI should be cleared
+    // The error boundary's fallback should be cleared
     expect(
       screen.queryByText(
         "There was an error while getting inbox notifications."

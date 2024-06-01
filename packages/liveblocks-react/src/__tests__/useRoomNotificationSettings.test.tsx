@@ -37,9 +37,7 @@ afterEach(() => {
 afterAll(() => server.close());
 
 // TODO: Dry up and create utils that wrap renderHook
-function createRoomContextForTest<
-  TThreadMetadata extends BaseMetadata = BaseMetadata,
->() {
+function createRoomContextForTest<M extends BaseMetadata>() {
   const client = createClient({
     publicApiKey: "pk_xxx",
     polyfills: {
@@ -48,13 +46,7 @@ function createRoomContextForTest<
   });
 
   return {
-    roomCtx: createRoomContext<
-      JsonObject,
-      never,
-      never,
-      never,
-      TThreadMetadata
-    >(client),
+    roomCtx: createRoomContext<JsonObject, never, never, never, M>(client),
     liveblocksCtx: createLiveblocksContext(client),
   };
 }
@@ -495,7 +487,7 @@ describe("useRoomNotificationSettingsSuspense: error", () => {
     expect(result.current).toEqual(null);
 
     await waitFor(() =>
-      // Check if the error boundary's fallback UI is displayed
+      // Check if the error boundary's fallback is displayed
       expect(
         screen.getByText(
           "There was an error while getting room notification settings."
@@ -559,7 +551,7 @@ describe("useRoomNotificationSettingsSuspense: error", () => {
 
     // A new fetch request for the threads should have been made after the initial render
     await waitFor(() => expect(getRoomNotificationSettingsReqCount).toBe(1));
-    // Check if the error boundary's fallback UI is displayed
+    // Check if the error boundary's fallback is displayed
     expect(
       screen.getByText(
         "There was an error while getting room notification settings."
@@ -574,7 +566,7 @@ describe("useRoomNotificationSettingsSuspense: error", () => {
     // Simulate clicking the retry button
     fireEvent.click(screen.getByText("Retry"));
 
-    // The error boundary's fallback UI should be cleared
+    // The error boundary's fallback should be cleared
     expect(
       screen.queryByText(
         "There was an error while getting room notification settings."

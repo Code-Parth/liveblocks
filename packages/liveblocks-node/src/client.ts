@@ -4,6 +4,7 @@
  * @liveblocks/core has browser-specific code.
  */
 import type {
+  ActivityData,
   BaseMetadata,
   CommentBody,
   CommentData,
@@ -16,6 +17,7 @@ import type {
   Json,
   JsonObject,
   PlainLsonObject,
+  QueryMetadata,
   RoomNotificationSettings,
   ThreadData,
   ThreadDataPlain,
@@ -23,7 +25,9 @@ import type {
 import {
   convertToCommentData,
   convertToCommentUserReaction,
+  convertToInboxNotificationData,
   convertToThreadData,
+  objectToQuery,
 } from "@liveblocks/core";
 
 import { Session } from "./Session";
@@ -89,6 +93,7 @@ export type RoomAccesses = Record<
   ["room:write"] | ["room:read", "room:presence:write"]
 >;
 export type RoomMetadata = Record<string, string | string[]>;
+type QueryRoomMetadata = Record<string, string>;
 
 export type RoomInfo = {
   type: "room";
@@ -175,9 +180,10 @@ export class Liveblocks {
   /** @internal */
   private async putBinary(
     path: URLSafeString,
-    body: Uint8Array
+    body: Uint8Array,
+    params?: QueryParams
   ): Promise<Response> {
-    const url = urljoin(this._baseUrl, path);
+    const url = urljoin(this._baseUrl, path, params);
     const headers = {
       Authorization: `Bearer ${this._secret}`,
       "Content-Type": "application/octet-stream",
@@ -318,15 +324,49 @@ export class Liveblocks {
    * @param params.userId (optional) A filter on users accesses.
    * @param params.metadata (optional) A filter on metadata. Multiple metadata keys can be used to filter rooms.
    * @param params.groupIds (optional) A filter on groups accesses. Multiple groups can be used.
+   * @param params.query (optional) A query to filter rooms by. It is based on our query language. You can filter by metadata and room ID.
    * @returns A list of rooms.
    */
   public async getRooms(
     params: {
       limit?: number;
       startingAfter?: string;
-      metadata?: RoomMetadata;
+      /**
+       * @deprecated Use `query` instead.
+       */
+      metadata?: QueryRoomMetadata;
       userId?: string;
       groupIds?: string[];
+      /**
+       * The query to filter rooms by. It is based on our query language.
+       * @example
+       * ```
+       * {
+       *   query: 'metadata["status"]:"open" AND roomId^"liveblocks:"'
+       * }
+       * ```
+       * @example
+       * ```
+       * {
+       *   query: {
+       *     metadata: {
+       *       status: "open",
+       *     },
+       *     roomId: {
+       *       startsWith: "liveblocks:"
+       *     }
+       *   }
+       * }
+       * ```
+       */
+      query?:
+        | string
+        | {
+            metadata?: QueryRoomMetadata;
+            roomId?: {
+              startsWith: string;
+            };
+          };
     } = {}
   ): Promise<{
     nextPage: string | null;
@@ -335,6 +375,14 @@ export class Liveblocks {
   }> {
     const path = url`/v2/rooms`;
 
+    let query: string | undefined;
+
+    if (typeof params.query === "string") {
+      query = params.query;
+    } else if (typeof params.query === "object") {
+      query = objectToQuery(params.query);
+    }
+
     const queryParams = {
       limit: params.limit,
       startingAfter: params.startingAfter,
@@ -342,11 +390,12 @@ export class Liveblocks {
       groupIds: params.groupIds ? params.groupIds.join(",") : undefined,
       // "Flatten" {metadata: {foo: "bar"}} to {"metadata.foo": "bar"}
       ...Object.fromEntries(
-        Object.entries(params.metadata ?? {}).map(([key, val]) => {
-          const value = Array.isArray(val) ? val.join(",") : val;
-          return [`metadata.${key}`, value];
-        })
+        Object.entries(params.metadata ?? {}).map(([key, val]) => [
+          `metadata.${key}`,
+          val,
+        ])
       ),
+      query,
     };
 
     const res = await this.get(path, queryParams);
@@ -679,12 +728,18 @@ export class Liveblocks {
    * Send a Yjs binary update to the room’s Yjs document. You can use this endpoint to initialize Yjs data for the room or to update the room’s Yjs document.
    * @param roomId The id of the room to send the Yjs binary update to.
    * @param update The Yjs update to send. Typically the result of calling `Yjs.encodeStateAsUpdate(doc)`. Read the [Yjs documentation](https://docs.yjs.dev/api/document-updates) to learn how to create a binary update.
+   * @param params.guid (optional) If provided, the binary update will be applied to the Yjs subdocument with the given guid. If not provided, the binary update will be applied to the root Yjs document.
    */
   public async sendYjsBinaryUpdate(
     roomId: string,
-    update: Uint8Array
+    update: Uint8Array,
+    params: {
+      guid?: string;
+    } = {}
   ): Promise<void> {
-    const res = await this.putBinary(url`/v2/rooms/${roomId}/ydoc`, update);
+    const res = await this.putBinary(url`/v2/rooms/${roomId}/ydoc`, update, {
+      guid: params.guid,
+    });
     if (!res.ok) {
       const text = await res.text();
       throw new LiveblocksError(res.status, text);
@@ -695,12 +750,18 @@ export class Liveblocks {
    * Returns the room’s Yjs document encoded as a single binary update. This can be used by Y.applyUpdate(responseBody) to get a copy of the document in your backend.
    * See [Yjs documentation](https://docs.yjs.dev/api/document-updates) for more information on working with updates.
    * @param roomId The id of the room to get the Yjs document from.
+   * @param params.guid (optional) If provided, returns the binary update of the Yjs subdocument with the given guid. If not provided, returns the binary update of the root Yjs document.
    * @returns The room’s Yjs document encoded as a single binary update.
    */
   public async getYjsDocumentAsBinaryUpdate(
-    roomId: string
+    roomId: string,
+    params: {
+      guid?: string;
+    } = {}
   ): Promise<ArrayBuffer> {
-    const res = await this.get(url`/v2/rooms/${roomId}/ydoc-binary`);
+    const res = await this.get(url`/v2/rooms/${roomId}/ydoc-binary`, {
+      guid: params.guid,
+    });
     if (!res.ok) {
       const text = await res.text();
       throw new LiveblocksError(res.status, text);
@@ -870,14 +931,55 @@ export class Liveblocks {
    * Gets all the threads in a room.
    *
    * @param params.roomId The room ID to get the threads from.
+   * @param params.query The query to filter threads by. It is based on our query language and can filter by metadata.
    * @returns A list of threads.
    */
-  public async getThreads(params: {
+  public async getThreads<M extends BaseMetadata>(params: {
     roomId: string;
+    /**
+     * The query to filter threads by. It is based on our query language.
+     *
+     * @example
+     * ```
+     * {
+     *   query: "metadata['organization']^'liveblocks:' AND metadata['status']:'open' AND metadata['resolved']:false AND metadata['priority']:3"
+     * }
+     * ```
+     * @example
+     * ```
+     * {
+     *   query: {
+     *     metadata: {
+     *       status: "open",
+     *       resolved: false,
+     *       priority: 3,
+     *       organization: {
+     *         startsWith: "liveblocks:"
+     *       }
+     *     }
+     *   }
+     * }
+     * ```
+     */
+    query?:
+      | string
+      | {
+          metadata?: Partial<QueryMetadata<M>>;
+        };
   }): Promise<{ data: ThreadData[] }> {
     const { roomId } = params;
 
-    const res = await this.get(url`/v2/rooms/${roomId}/threads`);
+    let query: string | undefined;
+
+    if (typeof params.query === "string") {
+      query = params.query;
+    } else if (typeof params.query === "object") {
+      query = objectToQuery(params.query);
+    }
+
+    const res = await this.get(url`/v2/rooms/${roomId}/threads`, {
+      query,
+    });
     if (!res.ok) {
       const text = await res.text();
       throw new LiveblocksError(res.status, text);
@@ -895,10 +997,9 @@ export class Liveblocks {
    * @param params.threadId The thread ID.
    * @returns A thread.
    */
-  public async getThread<TThreadMetadata extends BaseMetadata = never>(params: {
-    roomId: string;
-    threadId: string;
-  }): Promise<ThreadData<TThreadMetadata>> {
+  public async getThread<
+    M extends BaseMetadata = never, // TODO Change this to DM for 2.0
+  >(params: { roomId: string; threadId: string }): Promise<ThreadData<M>> {
     const { roomId, threadId } = params;
 
     const res = await this.get(url`/v2/rooms/${roomId}/threads/${threadId}`);
@@ -906,9 +1007,7 @@ export class Liveblocks {
       const text = await res.text();
       throw new LiveblocksError(res.status, text);
     }
-    return convertToThreadData(
-      (await res.json()) as ThreadDataPlain<TThreadMetadata>
-    );
+    return convertToThreadData((await res.json()) as ThreadDataPlain<M>);
   }
 
   /**
@@ -1065,20 +1164,18 @@ export class Liveblocks {
    * @returns The created thread. The thread will be created with the specified comment as its first comment.
    */
   public async createThread<
-    TThreadMetadata extends BaseMetadata = never,
+    M extends BaseMetadata = never, // TODO Change this to DM for 2.0
   >(params: {
     roomId: string;
     data: {
-      metadata?: [TThreadMetadata] extends [never]
-        ? Record<string, never>
-        : TThreadMetadata;
+      metadata?: [M] extends [never] ? Record<string, never> : M;
       comment: {
         userId: string;
         createdAt?: Date;
         body: CommentBody;
       };
     };
-  }): Promise<ThreadData<TThreadMetadata>> {
+  }): Promise<ThreadData<M>> {
     const { roomId, data } = params;
 
     const res = await this.post(url`/v2/rooms/${roomId}/threads`, {
@@ -1094,9 +1191,7 @@ export class Liveblocks {
       throw new LiveblocksError(res.status, text);
     }
 
-    return convertToThreadData(
-      (await res.json()) as ThreadDataPlain<TThreadMetadata>
-    );
+    return convertToThreadData((await res.json()) as ThreadDataPlain<M>);
   }
 
   /**
@@ -1109,7 +1204,7 @@ export class Liveblocks {
    * @returns The updated thread.
    */
   public async editThreadMetadata<
-    TThreadMetadata extends BaseMetadata = never,
+    M extends BaseMetadata = never, // TODO Change this to DM for 2.0
   >(params: {
     roomId: string;
     threadId: string;
@@ -1118,7 +1213,7 @@ export class Liveblocks {
       userId: string;
       updatedAt?: Date;
     };
-  }): Promise<TThreadMetadata> {
+  }): Promise<M> {
     const { roomId, threadId, data } = params;
 
     const res = await this.post(
@@ -1134,7 +1229,7 @@ export class Liveblocks {
       throw new LiveblocksError(res.status, text);
     }
 
-    return (await res.json()) as TThreadMetadata;
+    return (await res.json()) as M;
   }
 
   /**
@@ -1229,13 +1324,9 @@ export class Liveblocks {
       throw new LiveblocksError(res.status, text);
     }
 
-    const data = (await res.json()) as InboxNotificationDataPlain;
-
-    return {
-      ...data,
-      notifiedAt: new Date(data.notifiedAt),
-      readAt: data.readAt ? new Date(data.readAt) : null,
-    };
+    return convertToInboxNotificationData(
+      (await res.json()) as InboxNotificationDataPlain
+    );
   }
 
   /**
@@ -1299,6 +1390,53 @@ export class Liveblocks {
     const res = await this.delete(
       url`/v2/rooms/${roomId}/users/${userId}/notification-settings`
     );
+    if (!res.ok) {
+      const text = await res.text();
+      throw new LiveblocksError(res.status, text);
+    }
+  }
+
+  /**
+   * Update a room ID.
+   * @param params.roomId The current ID of the room.
+   * @param params.newRoomId The new room ID.
+   */
+  public async updateRoomId(params: {
+    currentRoomId: string;
+    newRoomId: string;
+  }): Promise<RoomInfo> {
+    const { currentRoomId, newRoomId } = params;
+
+    const res = await this.post(
+      url`/v2/rooms/${currentRoomId}/update-room-id`,
+      {
+        newRoomId,
+      }
+    );
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new LiveblocksError(res.status, text);
+    }
+    const data = (await res.json()) as RoomInfoPlain;
+    return {
+      ...data,
+      createdAt: new Date(data.createdAt),
+      lastConnectionAt: data.lastConnectionAt
+        ? new Date(data.lastConnectionAt)
+        : undefined,
+    };
+  }
+
+  public async triggerInboxNotification(params: {
+    userId: string;
+    kind: `$${string}`;
+    roomId?: string;
+    subjectId: string;
+    activityData: ActivityData;
+  }): Promise<void> {
+    const res = await this.post(url`/v2/inbox-notifications/trigger`, params);
+
     if (!res.ok) {
       const text = await res.text();
       throw new LiveblocksError(res.status, text);
